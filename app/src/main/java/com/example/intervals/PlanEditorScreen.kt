@@ -192,7 +192,9 @@ fun PlanEditorScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        Button(onClick = { onStartPlan(blocks) }) {
+        Button(onClick = { onStartPlan(blocks) },
+            enabled = blocks.any { it.intervals.isNotEmpty() }
+            ) {
             Text("Start Plan")
         }
     }
