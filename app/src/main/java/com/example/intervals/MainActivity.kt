@@ -18,6 +18,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var currentPlan by remember { mutableStateOf<RunPlan?>(null) }
+            var lastFinishedPlan by remember { mutableStateOf<RunPlan?>(null) }
+            var showingSummary by remember { mutableStateOf(false) }
 
             Box(
                 modifier = Modifier
@@ -25,14 +27,35 @@ class MainActivity : ComponentActivity() {
                     .background(Color(0xFFF2F2F2))
                     .padding(16.dp)
             ) {
-                if (currentPlan == null) {
-                    PlanEditorScreen { blocks ->
-                        currentPlan = RunPlan(name = "Custom Plan", blocks = blocks)
+                when {
+                    currentPlan != null -> {
+                        RunScreen(
+                            plan = currentPlan!!,
+                            onPlanFinished = { finishedPlan ->
+                                // store plan to show summary
+                                lastFinishedPlan = finishedPlan
+                                currentPlan = null
+                                showingSummary = true
+                            }
+                        )
                     }
-                } else {
-                    RunScreen(plan = currentPlan!!, onFinish = { currentPlan = null })
+                    showingSummary && lastFinishedPlan != null -> {
+                        PlanSummaryScreen(
+                            plan = lastFinishedPlan!!,
+                            onBack = {
+                                showingSummary = false
+                                lastFinishedPlan = null
+                            }
+                        )
+                    }
+                    else -> {
+                        PlanEditorScreen { blocks ->
+                            currentPlan = RunPlan(name = "Custom Plan", blocks = blocks)
+                        }
+                    }
                 }
             }
         }
+
     }
 }

@@ -17,7 +17,7 @@ import kotlinx.coroutines.delay
 import java.util.*
 
 @Composable
-fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
+fun RunScreen(plan: RunPlan, onPlanFinished: (RunPlan) -> Unit) {
     val context = LocalContext.current
     val tts = remember {
         TextToSpeech(context, null)
@@ -75,7 +75,7 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
                     currentIntervalIndex = 0
                     if (currentBlockIndex >= plan.blocks.size) {
                         running = false
-                        onFinish?.invoke()
+                        onPlanFinished(plan) // <-- navigate to summary here
                         return@LaunchedEffect
                     }
                 }
@@ -98,7 +98,7 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
                 delay(50)
             }
             running = false
-            onFinish?.invoke()
+            onPlanFinished(plan) // <-- navigate to summary if user cancels
             isHoldingStop = false
         } else stopProgress = 0f
     }
