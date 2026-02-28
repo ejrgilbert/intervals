@@ -13,10 +13,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import java.util.Locale
+import java.util.*
 
 @Composable
 fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
@@ -27,50 +25,70 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
     LaunchedEffect(tts) {
         tts.language = Locale.US
     }
-    val allBlocks = plan.blocks
 
     var currentBlockIndex by remember { mutableStateOf(0) }
     var currentIntervalIndex by remember { mutableStateOf(0) }
-    var secondsRemaining by remember { mutableStateOf(allBlocks[0].intervals[0].durationSeconds) }
+    var secondsRemaining by remember { mutableStateOf(
+        plan.blocks.getOrNull(0)?.intervals?.getOrNull(0)?.durationSeconds ?: 0
+    ) }
     var running by remember { mutableStateOf(false) }
 
     var isHoldingStop by remember { mutableStateOf(false) }
     var stopProgress by remember { mutableStateOf(0f) }
 
+    // --- Track block repeat counts ---
+    val blockRepeatCounters = remember { mutableStateMapOf<Int, Int>() }
+
+    // --- Main timer coroutine ---
     LaunchedEffect(running, currentBlockIndex, currentIntervalIndex) {
-        if (running) {
-            val block = allBlocks[currentBlockIndex]
-            val interval = block.intervals[currentIntervalIndex]
+        if (!running) return@LaunchedEffect
+        if (plan.blocks.isEmpty()) return@LaunchedEffect
 
-            // Speak the interval label
-            tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
+        val block = plan.blocks.getOrNull(currentBlockIndex) ?: return@LaunchedEffect
+        val interval = block.intervals.getOrNull(currentIntervalIndex) ?: return@LaunchedEffect
 
-            while (secondsRemaining > 0) {
-                delay(1000)
-                secondsRemaining--
-            }
+        // Speak interval label
+        tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
 
-            currentIntervalIndex++
-            if (currentIntervalIndex >= block.intervals.size) {
-                // move to next block
-                currentBlockIndex++
+        while (secondsRemaining > 0 && running) {
+            delay(1000)
+            secondsRemaining--
+        }
+
+        if (!running) return@LaunchedEffect
+
+        // Move to next interval
+        currentIntervalIndex++
+        val nextInterval: Interval?
+        if (currentIntervalIndex >= block.intervals.size) {
+            // End of block, check repeats
+            if (block.repeatIndefinitely) {
                 currentIntervalIndex = 0
-                if (currentBlockIndex >= allBlocks.size) {
-                    // check if last block should repeat
-                    if (block.repeatIndefinitely) {
-                        currentBlockIndex = allBlocks.size - 1
-                    } else {
+            } else {
+                val repeatsDone = blockRepeatCounters[currentBlockIndex] ?: 0
+                if (repeatsDone + 1 < (block.repeatCount ?: 1)) {
+                    blockRepeatCounters[currentBlockIndex] = repeatsDone + 1
+                    currentIntervalIndex = 0
+                } else {
+                    // Move to next block
+                    currentBlockIndex++
+                    currentIntervalIndex = 0
+                    if (currentBlockIndex >= plan.blocks.size) {
                         running = false
                         onFinish?.invoke()
                         return@LaunchedEffect
                     }
                 }
             }
-            val nextInterval = allBlocks[currentBlockIndex].intervals[currentIntervalIndex]
-            secondsRemaining = nextInterval.durationSeconds
+            nextInterval = plan.blocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
+        } else {
+            nextInterval = block.intervals.getOrNull(currentIntervalIndex)
         }
+
+        secondsRemaining = nextInterval?.durationSeconds ?: 0
     }
 
+    // --- Stop button hold ---
     LaunchedEffect(isHoldingStop) {
         if (isHoldingStop) {
             stopProgress = 0f
@@ -79,20 +97,27 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
                 stopProgress += 1f / steps
                 delay(50)
             }
+            running = false
             onFinish?.invoke()
             isHoldingStop = false
         } else stopProgress = 0f
     }
 
-    val currentInterval = allBlocks[currentBlockIndex].intervals[currentIntervalIndex]
+    val currentInterval = plan.blocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(currentInterval.label, style = MaterialTheme.typography.headlineMedium)
-        Text("$secondsRemaining sec", style = MaterialTheme.typography.displayLarge)
+        Text(
+            text = currentInterval?.label ?: "No Interval",
+            style = MaterialTheme.typography.headlineMedium
+        )
+        Text(
+            text = "${secondsRemaining} sec",
+            style = MaterialTheme.typography.displayLarge
+        )
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -123,7 +148,7 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
         }
     }
 
-    // Clean up TTS when this composable leaves
+    // --- Clean up TTS ---
     DisposableEffect(Unit) {
         onDispose {
             tts.stop()
@@ -131,4 +156,3 @@ fun RunScreen(plan: RunPlan, onFinish: (() -> Unit)? = null) {
         }
     }
 }
-
