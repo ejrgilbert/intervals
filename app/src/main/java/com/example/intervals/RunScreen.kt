@@ -14,10 +14,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import java.util.*
+import java.util.Locale
 
 @Composable
-fun RunScreen(plan: RunPlan, onPlanFinished: (RunPlan) -> Unit) {
+fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     val context = LocalContext.current
     val tts = remember {
         TextToSpeech(context, null)
@@ -26,69 +26,56 @@ fun RunScreen(plan: RunPlan, onPlanFinished: (RunPlan) -> Unit) {
         tts.language = Locale.US
     }
 
+    val allBlocks = plan.blocks
     var currentBlockIndex by remember { mutableStateOf(0) }
     var currentIntervalIndex by remember { mutableStateOf(0) }
-    var secondsRemaining by remember { mutableStateOf(
-        plan.blocks.getOrNull(0)?.intervals?.getOrNull(0)?.durationSeconds ?: 0
-    ) }
+    var secondsRemaining by remember {
+        mutableStateOf(allBlocks.firstOrNull()?.intervals?.firstOrNull()?.durationSeconds ?: 0)
+    }
     var running by remember { mutableStateOf(false) }
 
     var isHoldingStop by remember { mutableStateOf(false) }
     var stopProgress by remember { mutableStateOf(0f) }
 
-    // --- Track block repeat counts ---
-    val blockRepeatCounters = remember { mutableStateMapOf<Int, Int>() }
-
-    // --- Main timer coroutine ---
+    // --- Countdown timer ---
     LaunchedEffect(running, currentBlockIndex, currentIntervalIndex) {
         if (!running) return@LaunchedEffect
-        if (plan.blocks.isEmpty()) return@LaunchedEffect
+        while (running && currentBlockIndex < allBlocks.size) {
+            val block = allBlocks[currentBlockIndex]
+            val interval = block.intervals[currentIntervalIndex]
 
-        val block = plan.blocks.getOrNull(currentBlockIndex) ?: return@LaunchedEffect
-        val interval = block.intervals.getOrNull(currentIntervalIndex) ?: return@LaunchedEffect
+            // Speak the interval label
+            tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
 
-        // Speak interval label
-        tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
+            while (secondsRemaining > 0 && running) {
+                delay(1000)
+                secondsRemaining--
+            }
 
-        while (secondsRemaining > 0 && running) {
-            delay(1000)
-            secondsRemaining--
-        }
-
-        if (!running) return@LaunchedEffect
-
-        // Move to next interval
-        currentIntervalIndex++
-        val nextInterval: Interval?
-        if (currentIntervalIndex >= block.intervals.size) {
-            // End of block, check repeats
-            if (block.repeatIndefinitely) {
+            // Move to next interval
+            currentIntervalIndex++
+            if (currentIntervalIndex >= block.intervals.size) {
                 currentIntervalIndex = 0
-            } else {
-                val repeatsDone = blockRepeatCounters[currentBlockIndex] ?: 0
-                if (repeatsDone + 1 < (block.repeatCount ?: 1)) {
-                    blockRepeatCounters[currentBlockIndex] = repeatsDone + 1
-                    currentIntervalIndex = 0
-                } else {
-                    // Move to next block
-                    currentBlockIndex++
-                    currentIntervalIndex = 0
-                    if (currentBlockIndex >= plan.blocks.size) {
+                currentBlockIndex++
+                if (currentBlockIndex >= allBlocks.size) {
+                    // Check if last block repeats
+                    if (block.repeatIndefinitely) {
+                        currentBlockIndex = allBlocks.size - 1
+                    } else {
                         running = false
-                        onPlanFinished(plan) // <-- navigate to summary here
+                        onFinish(plan)
                         return@LaunchedEffect
                     }
                 }
             }
-            nextInterval = plan.blocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
-        } else {
-            nextInterval = block.intervals.getOrNull(currentIntervalIndex)
-        }
 
-        secondsRemaining = nextInterval?.durationSeconds ?: 0
+            // Set next interval
+            val nextInterval = allBlocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
+            secondsRemaining = nextInterval?.durationSeconds ?: 0
+        }
     }
 
-    // --- Stop button hold ---
+    // --- Hold-to-stop logic ---
     LaunchedEffect(isHoldingStop) {
         if (isHoldingStop) {
             stopProgress = 0f
@@ -98,57 +85,65 @@ fun RunScreen(plan: RunPlan, onPlanFinished: (RunPlan) -> Unit) {
                 delay(50)
             }
             running = false
-            onPlanFinished(plan) // <-- navigate to summary if user cancels
+            onFinish(plan)
             isHoldingStop = false
         } else stopProgress = 0f
     }
 
-    val currentInterval = plan.blocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
+    val currentInterval = allBlocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = currentInterval?.label ?: "No Interval",
-            style = MaterialTheme.typography.headlineMedium
-        )
-        Text(
-            text = "${secondsRemaining} sec",
-            style = MaterialTheme.typography.displayLarge
-        )
+        currentInterval?.let { interval ->
+            Text(interval.label, style = MaterialTheme.typography.headlineMedium)
 
-        Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Row {
-            Button(onClick = { running = !running }) {
-                Text(if (running) "Pause" else "Start")
+            // Show "N min M sec" if > 60, otherwise just "SS sec"
+            if (secondsRemaining > 59) {
+                val minutes = secondsRemaining / 60
+                val seconds = secondsRemaining % 60
+                Text("${minutes}m ${seconds}s", style = MaterialTheme.typography.displayLarge)
+            } else {
+                Text("${secondsRemaining}s", style = MaterialTheme.typography.displayLarge)
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-            Box(
-                modifier = Modifier
-                    .height(56.dp)
-                    .width(100.dp)
-                    .pointerInput(Unit) { detectTapGestures(onLongPress = { isHoldingStop = true }) }
-                    .background(
-                        color = if (isHoldingStop) Color.Red.copy(alpha = stopProgress) else Color.Gray,
-                        shape = RoundedCornerShape(8.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Stop", color = Color.White)
+            Row {
+                Button(onClick = { running = !running }) {
+                    Text(if (running) "Pause" else "Start")
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Box(
+                    modifier = Modifier
+                        .height(56.dp)
+                        .width(100.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onLongPress = { isHoldingStop = true })
+                        }
+                        .background(
+                            color = if (isHoldingStop) Color.Red.copy(alpha = stopProgress) else Color.Gray,
+                            shape = RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Stop", color = Color.White)
+                }
             }
-        }
 
-        if (isHoldingStop) {
-            LinearProgressIndicator(progress = stopProgress, modifier = Modifier.fillMaxWidth().height(4.dp))
+            if (isHoldingStop) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(progress = stopProgress, modifier = Modifier.fillMaxWidth().height(4.dp))
+            }
         }
     }
 
-    // --- Clean up TTS ---
     DisposableEffect(Unit) {
         onDispose {
             tts.stop()

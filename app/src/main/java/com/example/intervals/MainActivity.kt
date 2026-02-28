@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
                     currentPlan != null -> {
                         RunScreen(
                             plan = currentPlan!!,
-                            onPlanFinished = { finishedPlan ->
+                            onFinish = { finishedPlan ->
                                 // store plan to show summary
                                 lastFinishedPlan = finishedPlan
                                 currentPlan = null

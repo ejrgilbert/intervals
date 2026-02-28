@@ -32,8 +32,10 @@ fun PlanSummaryScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
 
-                    block.intervals.forEachIndexed { intervalIndex, interval ->
-                        Text("${interval.label}: ${interval.durationSeconds} sec")
+                    block.intervals.forEach { interval ->
+                        val minutes = interval.durationSeconds / 60
+                        val seconds = interval.durationSeconds % 60
+                        Text("${interval.label}: ${minutes}m ${seconds}s")
                     }
                 }
                 Divider()
