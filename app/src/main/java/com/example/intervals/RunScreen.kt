@@ -1,9 +1,5 @@
 package com.example.intervalrunner
 
-import android.media.AudioManager
-import android.media.ToneGenerator
-import android.os.SystemClock
-import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -20,34 +16,38 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
-import java.util.Locale
 
 @Composable
 fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     val context = LocalContext.current
-    var ttsReady by remember { mutableStateOf(false) }
-    val tts = remember {
-        TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) ttsReady = true
+
+    // Prepare the engine for this plan unless it's already mid-run on the same plan.
+    LaunchedEffect(plan) {
+        val s = TimerEngine.state.value
+        if (s.plan !== plan || s.finished) {
+            TimerEngine.prepare(plan)
         }
     }
-    LaunchedEffect(ttsReady) {
-        if (ttsReady) tts.language = Locale.US
-    }
-    val toneGenerator = remember {
-        runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }.getOrNull()
+
+    val snap by TimerEngine.state.collectAsStateWithLifecycle()
+
+    // Engine sets finished=true on natural completion or explicit stop. Bubble up.
+    LaunchedEffect(snap.finished) {
+        if (snap.finished) onFinish(plan)
     }
 
     val allBlocks = plan.blocks
-    var currentBlockIndex by remember { mutableStateOf(0) }
-    var currentIntervalIndex by remember { mutableStateOf(0) }
-    var currentBlockPass by remember { mutableStateOf(0) }
-    var blockElapsedSeconds by remember { mutableStateOf(0) }
-    var secondsRemaining by remember {
-        mutableStateOf(allBlocks.firstOrNull()?.intervals?.firstOrNull()?.durationSeconds ?: 0)
-    }
-    var running by remember { mutableStateOf(false) }
+    val currentBlockIndex = snap.blockIndex.coerceAtMost(allBlocks.size - 1).coerceAtLeast(0)
+    val currentBlock = allBlocks.getOrNull(currentBlockIndex) ?: return
+    val currentIntervalIndex = snap.intervalIndex
+        .coerceAtMost(currentBlock.intervals.size - 1).coerceAtLeast(0)
+    val currentInterval = currentBlock.intervals.getOrNull(currentIntervalIndex) ?: return
+    val secondsRemaining = snap.secondsRemaining
+    val running = snap.running
+    val blockElapsedSeconds = snap.blockElapsedSeconds
+    val currentBlockPass = snap.blockPass
 
     var isHoldingStop by remember { mutableStateOf(false) }
     var stopProgress by remember { mutableStateOf(0f) }
@@ -55,88 +55,6 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     var isHoldingSkip by remember { mutableStateOf(false) }
     var skipProgress by remember { mutableStateOf(0f) }
 
-    // --- Countdown timer ---
-    LaunchedEffect(running, currentBlockIndex, currentIntervalIndex, currentBlockPass) {
-        if (!running) return@LaunchedEffect
-        while (running && currentBlockIndex < allBlocks.size) {
-            val block = allBlocks[currentBlockIndex]
-            val interval = block.intervals[currentIntervalIndex]
-
-            // Beep, then announce the interval label
-            toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
-            delay(300)
-            if (ttsReady) {
-                tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
-            }
-
-            val segmentStart = SystemClock.elapsedRealtime()
-            val baseBlockElapsed = blockElapsedSeconds
-            val endAt = segmentStart + secondsRemaining * 1000L
-            var durationCutoff = false
-            while (running) {
-                val now = SystemClock.elapsedRealtime()
-                val msLeft = endAt - now
-                val segmentElapsedSec = ((now - segmentStart) / 1000).toInt()
-                val curBlockElapsed = baseBlockElapsed + segmentElapsedSec
-
-                val budget = block.repeatDurationSeconds
-                if (budget != null && curBlockElapsed >= budget) {
-                    blockElapsedSeconds = budget
-                    secondsRemaining = 0
-                    durationCutoff = true
-                    break
-                }
-                if (msLeft <= 0) {
-                    blockElapsedSeconds = curBlockElapsed
-                    secondsRemaining = 0
-                    break
-                }
-                blockElapsedSeconds = curBlockElapsed
-                // Round up so we display "1s" until the moment we hit zero,
-                // rather than dropping to 0 with a full second still to go.
-                secondsRemaining = ((msLeft + 999) / 1000).toInt()
-                delay(msLeft.coerceAtMost(250L))
-            }
-
-            // Advance — to next block if duration was cut short, else next interval.
-            if (durationCutoff) {
-                currentBlockPass = 0
-                currentIntervalIndex = 0
-                blockElapsedSeconds = 0
-                currentBlockIndex++
-                if (currentBlockIndex >= allBlocks.size) {
-                    running = false
-                    onFinish(plan)
-                    return@LaunchedEffect
-                }
-            } else {
-                currentIntervalIndex++
-                if (currentIntervalIndex >= block.intervals.size) {
-                    currentIntervalIndex = 0
-                    val targetPasses = block.repeatCount ?: 1
-                    val completedPasses = currentBlockPass + 1
-                    if (block.repeatIndefinitely || completedPasses < targetPasses) {
-                        currentBlockPass = completedPasses
-                    } else {
-                        currentBlockPass = 0
-                        blockElapsedSeconds = 0
-                        currentBlockIndex++
-                        if (currentBlockIndex >= allBlocks.size) {
-                            running = false
-                            onFinish(plan)
-                            return@LaunchedEffect
-                        }
-                    }
-                }
-            }
-
-            // Set next interval
-            val nextInterval = allBlocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
-            secondsRemaining = nextInterval?.durationSeconds ?: 0
-        }
-    }
-
-    // --- Hold-to-stop logic ---
     LaunchedEffect(isHoldingStop) {
         if (isHoldingStop) {
             stopProgress = 0f
@@ -145,13 +63,11 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                 stopProgress += 1f / steps
                 delay(50)
             }
-            running = false
-            onFinish(plan)
+            TimerService.sendCommand(context, TimerService.ACTION_STOP)
             isHoldingStop = false
         } else stopProgress = 0f
     }
 
-    // --- Hold-to-skip-block logic ---
     LaunchedEffect(isHoldingSkip) {
         if (isHoldingSkip) {
             skipProgress = 0f
@@ -160,214 +76,194 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                 skipProgress += 1f / steps
                 delay(50)
             }
-            val nextBlockIndex = currentBlockIndex + 1
-            if (nextBlockIndex >= allBlocks.size) {
-                running = false
-                onFinish(plan)
-            } else {
-                currentBlockPass = 0
-                currentIntervalIndex = 0
-                blockElapsedSeconds = 0
-                currentBlockIndex = nextBlockIndex
-                secondsRemaining = allBlocks[nextBlockIndex].intervals.firstOrNull()?.durationSeconds ?: 0
-            }
+            TimerService.sendCommand(context, TimerService.ACTION_SKIP)
             isHoldingSkip = false
         } else skipProgress = 0f
     }
-
-    val currentInterval = allBlocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        currentInterval?.let { interval ->
-            Text(interval.label, style = MaterialTheme.typography.headlineMedium)
+        Text(currentInterval.label, style = MaterialTheme.typography.headlineMedium)
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // Show "N min M sec" if > 60, otherwise just "SS sec"
-            if (secondsRemaining > 59) {
-                val minutes = secondsRemaining / 60
-                val seconds = secondsRemaining % 60
-                Text("${minutes}m ${seconds}s", style = MaterialTheme.typography.displayLarge)
-            } else {
-                Text("${secondsRemaining}s", style = MaterialTheme.typography.displayLarge)
-            }
+        if (secondsRemaining > 59) {
+            val minutes = secondsRemaining / 60
+            val seconds = secondsRemaining % 60
+            Text("${minutes}m ${seconds}s", style = MaterialTheme.typography.displayLarge)
+        } else {
+            Text("${secondsRemaining}s", style = MaterialTheme.typography.displayLarge)
+        }
 
-            Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-            val block = allBlocks[currentBlockIndex]
-            val curIntervalDur = block.intervals[currentIntervalIndex].durationSeconds
-            val curIntervalFrac = if (curIntervalDur > 0) {
-                ((curIntervalDur - secondsRemaining).toFloat() / curIntervalDur).coerceIn(0f, 1f)
-            } else 0f
+        val curIntervalDur = currentBlock.intervals[currentIntervalIndex].durationSeconds
+        val curIntervalFrac = if (curIntervalDur > 0) {
+            ((curIntervalDur - secondsRemaining).toFloat() / curIntervalDur).coerceIn(0f, 1f)
+        } else 0f
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                allBlocks.forEachIndexed { index, b ->
-                    val fill: Float = when {
-                        index < currentBlockIndex -> 1f
-                        index > currentBlockIndex -> 0f
-                        b.repeatIndefinitely -> {
-                            val intervalsTotal = b.intervals.size.coerceAtLeast(1)
-                            ((currentIntervalIndex + curIntervalFrac) / intervalsTotal).coerceIn(0f, 1f)
-                        }
-                        b.repeatDurationSeconds != null -> {
-                            val budget = b.repeatDurationSeconds.coerceAtLeast(1).toFloat()
-                            (blockElapsedSeconds.toFloat() / budget).coerceIn(0f, 1f)
-                        }
-                        else -> {
-                            val passes = (b.repeatCount ?: 1).coerceAtLeast(1)
-                            val intervalsTotal = b.intervals.size.coerceAtLeast(1)
-                            val units = (passes * intervalsTotal).toFloat()
-                            val done = currentBlockPass * intervalsTotal + currentIntervalIndex + curIntervalFrac
-                            (done / units).coerceIn(0f, 1f)
-                        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            allBlocks.forEachIndexed { index, b ->
+                val fill: Float = when {
+                    index < currentBlockIndex -> 1f
+                    index > currentBlockIndex -> 0f
+                    b.repeatIndefinitely -> {
+                        val intervalsTotal = b.intervals.size.coerceAtLeast(1)
+                        ((currentIntervalIndex + curIntervalFrac) / intervalsTotal).coerceIn(0f, 1f)
                     }
+                    b.repeatDurationSeconds != null -> {
+                        val budget = b.repeatDurationSeconds.coerceAtLeast(1).toFloat()
+                        (blockElapsedSeconds.toFloat() / budget).coerceIn(0f, 1f)
+                    }
+                    else -> {
+                        val passes = (b.repeatCount ?: 1).coerceAtLeast(1)
+                        val intervalsTotal = b.intervals.size.coerceAtLeast(1)
+                        val units = (passes * intervalsTotal).toFloat()
+                        val done = currentBlockPass * intervalsTotal + currentIntervalIndex + curIntervalFrac
+                        (done / units).coerceIn(0f, 1f)
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(fill)
-                                .background(MaterialTheme.colorScheme.primary)
-                        )
-                    }
+                            .fillMaxHeight()
+                            .fillMaxWidth(fill)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            val progressParts = buildList {
-                if (block.intervals.size > 1) add("Interval ${currentIntervalIndex + 1}/${block.intervals.size}")
-                val showRep = block.repeatIndefinitely ||
-                        block.repeatDurationSeconds != null ||
-                        (block.repeatCount ?: 1) > 1
-                if (showRep) {
-                    val repTotal = when {
-                        block.repeatIndefinitely -> "∞"
-                        block.repeatDurationSeconds != null -> null
-                        else -> (block.repeatCount ?: 1).toString()
-                    }
-                    add(if (repTotal != null) "Rep ${currentBlockPass + 1}/$repTotal" else "Rep ${currentBlockPass + 1}")
-                }
-                block.repeatDurationSeconds?.let { budget ->
-                    val left = (budget - blockElapsedSeconds).coerceAtLeast(0)
-                    val m = left / 60
-                    val s = left % 60
-                    add(if (m > 0) "${m}m ${s}s left" else "${s}s left")
-                }
-                if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
+        val progressParts = buildList {
+            if (currentBlock.intervals.size > 1) {
+                add("Interval ${currentIntervalIndex + 1}/${currentBlock.intervals.size}")
             }
-            if (progressParts.isNotEmpty()) {
+            val showRep = currentBlock.repeatIndefinitely ||
+                    currentBlock.repeatDurationSeconds != null ||
+                    (currentBlock.repeatCount ?: 1) > 1
+            if (showRep) {
+                val repTotal = when {
+                    currentBlock.repeatIndefinitely -> "∞"
+                    currentBlock.repeatDurationSeconds != null -> null
+                    else -> (currentBlock.repeatCount ?: 1).toString()
+                }
+                add(if (repTotal != null) "Rep ${currentBlockPass + 1}/$repTotal" else "Rep ${currentBlockPass + 1}")
+            }
+            currentBlock.repeatDurationSeconds?.let { budget ->
+                val left = (budget - blockElapsedSeconds).coerceAtLeast(0)
+                val m = left / 60
+                val s = left % 60
+                add(if (m > 0) "${m}m ${s}s left" else "${s}s left")
+            }
+            if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
+        }
+        if (progressParts.isNotEmpty()) {
+            Text(
+                progressParts.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row {
+            Box(
+                modifier = Modifier
+                    .height(56.dp)
+                    .width(100.dp)
+                    .clickable {
+                        TimerService.sendCommand(context, TimerService.ACTION_PAUSE_RESUME)
+                    }
+                    .background(
+                        color = Color(0xFF4CAF50),
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    progressParts.joinToString("  ·  "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    if (running) "Pause" else "Start",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
-            Row {
-                Box(
-                    modifier = Modifier
-                        .height(56.dp)
-                        .width(100.dp)
-                        .clickable { running = !running }
-                        .background(
-                            color = Color(0xFF4CAF50),
-                            shape = RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (running) "Pause" else "Start",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Box(
-                    modifier = Modifier
-                        .height(56.dp)
-                        .width(100.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onLongPress = { isHoldingSkip = true })
-                        }
-                        .background(
-                            color = if (isHoldingSkip) {
-                                Color(0xFFFF9800).copy(alpha = 0.5f + 0.5f * skipProgress)
-                            } else Color(0xFFFF9800),
-                            shape = RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        ">>",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Box(
-                    modifier = Modifier
-                        .height(56.dp)
-                        .width(100.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onLongPress = { isHoldingStop = true })
-                        }
-                        .background(
-                            color = if (isHoldingStop) Color.Red.copy(alpha = stopProgress) else Color.Gray,
-                            shape = RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Stop",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+            Box(
+                modifier = Modifier
+                    .height(56.dp)
+                    .width(100.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { isHoldingSkip = true })
+                    }
+                    .background(
+                        color = if (isHoldingSkip) {
+                            Color(0xFFFF9800).copy(alpha = 0.5f + 0.5f * skipProgress)
+                        } else Color(0xFFFF9800),
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    ">>",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
-            if (isHoldingStop) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(progress = stopProgress, modifier = Modifier.fillMaxWidth().height(4.dp))
-            }
+            Spacer(modifier = Modifier.width(16.dp))
 
-            if (isHoldingSkip) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = skipProgress,
-                    color = Color(0xFFFF9800),
-                    modifier = Modifier.fillMaxWidth().height(4.dp)
+            Box(
+                modifier = Modifier
+                    .height(56.dp)
+                    .width(100.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { isHoldingStop = true })
+                    }
+                    .background(
+                        color = if (isHoldingStop) Color.Red.copy(alpha = stopProgress) else Color.Gray,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Stop",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
-    }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            tts.stop()
-            tts.shutdown()
-            toneGenerator?.release()
+        if (isHoldingStop) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(progress = stopProgress, modifier = Modifier.fillMaxWidth().height(4.dp))
+        }
+
+        if (isHoldingSkip) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = skipProgress,
+                color = Color(0xFFFF9800),
+                modifier = Modifier.fillMaxWidth().height(4.dp)
+            )
         }
     }
 }

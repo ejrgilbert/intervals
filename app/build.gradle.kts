@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.androidx.ui)
     debugImplementation("androidx.compose.ui:ui-tooling:1.5.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
