@@ -1,5 +1,6 @@
 package com.example.intervalrunner
 
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,9 +48,17 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             // Speak the interval label
             tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
 
-            while (secondsRemaining > 0 && running) {
-                delay(1000)
-                secondsRemaining--
+            val endAt = SystemClock.elapsedRealtime() + secondsRemaining * 1000L
+            while (running) {
+                val msLeft = endAt - SystemClock.elapsedRealtime()
+                if (msLeft <= 0) {
+                    secondsRemaining = 0
+                    break
+                }
+                // Round up so we display "1s" until the moment we hit zero,
+                // rather than dropping to 0 with a full second still to go.
+                secondsRemaining = ((msLeft + 999) / 1000).toInt()
+                delay(msLeft.coerceAtMost(250L))
             }
 
             // Move to next interval
