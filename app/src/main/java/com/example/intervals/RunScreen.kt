@@ -30,6 +30,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     val allBlocks = plan.blocks
     var currentBlockIndex by remember { mutableStateOf(0) }
     var currentIntervalIndex by remember { mutableStateOf(0) }
+    var currentBlockPass by remember { mutableStateOf(0) }
     var secondsRemaining by remember {
         mutableStateOf(allBlocks.firstOrNull()?.intervals?.firstOrNull()?.durationSeconds ?: 0)
     }
@@ -39,7 +40,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     var stopProgress by remember { mutableStateOf(0f) }
 
     // --- Countdown timer ---
-    LaunchedEffect(running, currentBlockIndex, currentIntervalIndex) {
+    LaunchedEffect(running, currentBlockIndex, currentIntervalIndex, currentBlockPass) {
         if (!running) return@LaunchedEffect
         while (running && currentBlockIndex < allBlocks.size) {
             val block = allBlocks[currentBlockIndex]
@@ -65,12 +66,14 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             currentIntervalIndex++
             if (currentIntervalIndex >= block.intervals.size) {
                 currentIntervalIndex = 0
-                currentBlockIndex++
-                if (currentBlockIndex >= allBlocks.size) {
-                    // Check if last block repeats
-                    if (block.repeatIndefinitely) {
-                        currentBlockIndex = allBlocks.size - 1
-                    } else {
+                val targetPasses = block.repeatCount ?: 1
+                val completedPasses = currentBlockPass + 1
+                if (block.repeatIndefinitely || completedPasses < targetPasses) {
+                    currentBlockPass = completedPasses
+                } else {
+                    currentBlockPass = 0
+                    currentBlockIndex++
+                    if (currentBlockIndex >= allBlocks.size) {
                         running = false
                         onFinish(plan)
                         return@LaunchedEffect
