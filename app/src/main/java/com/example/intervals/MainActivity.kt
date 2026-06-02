@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             var currentPlan by remember { mutableStateOf<RunPlan?>(null) }
             var lastFinishedPlan by remember { mutableStateOf<RunPlan?>(null) }
+            var lastExecutions by remember { mutableStateOf<List<BlockExecution>>(emptyList()) }
             var showingSummary by remember { mutableStateOf(false) }
 
             Box(
@@ -40,8 +41,9 @@ class MainActivity : ComponentActivity() {
                     currentPlan != null -> {
                         RunScreen(
                             plan = currentPlan!!,
-                            onFinish = { finishedPlan ->
+                            onFinish = { finishedPlan, executions ->
                                 lastFinishedPlan = finishedPlan
+                                lastExecutions = executions
                                 currentPlan = null
                                 showingSummary = true
                             }
@@ -50,9 +52,11 @@ class MainActivity : ComponentActivity() {
                     showingSummary && lastFinishedPlan != null -> {
                         PlanSummaryScreen(
                             plan = lastFinishedPlan!!,
+                            executions = lastExecutions,
                             onBack = {
                                 showingSummary = false
                                 lastFinishedPlan = null
+                                lastExecutions = emptyList()
                             }
                         )
                     }

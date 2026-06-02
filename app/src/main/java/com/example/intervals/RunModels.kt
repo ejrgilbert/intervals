@@ -23,3 +23,14 @@ data class RunPlan(
     val name: String,
     val blocks: List<IntervalBlock>
 )
+
+// Records what actually happened on one block during a run.
+// `completed` is true when the block ended on its own (passes exhausted or
+// duration budget hit); false when the user skipped or stopped mid-block.
+// `completedPasses` counts fully-finished repetitions through the block's intervals.
+data class BlockExecution(
+    val blockIndex: Int,
+    val actualSeconds: Int,
+    val completedPasses: Int,
+    val completed: Boolean,
+)

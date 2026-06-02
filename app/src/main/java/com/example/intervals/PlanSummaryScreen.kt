@@ -5,14 +5,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun PlanSummaryScreen(
     plan: RunPlan,
+    executions: List<BlockExecution>,
     onBack: () -> Unit // to go back to main menu or editor
 ) {
+    val executionByBlock = executions.associateBy { it.blockIndex }
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(16.dp)) {
@@ -36,10 +40,36 @@ fun PlanSummaryScreen(
                         }
                         else -> "${block.repeatCount}x"
                     }
-                    Text(
-                        "Block ${blockIndex + 1} ($repeatLabel)",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    val exec = executionByBlock[blockIndex]
+                    val actualText = when {
+                        exec == null -> "Not done"
+                        // Infinite blocks have no planned amount, so the actual is
+                        // always informative.
+                        block.repeatIndefinitely -> "Did ${exec.completedPasses}x"
+                        // Otherwise only annotate when the user fell short of the plan.
+                        exec.completed -> null
+                        block.repeatDurationSeconds != null ->
+                            "Did ${formatDuration(exec.actualSeconds)}"
+                        else -> "Did ${exec.completedPasses}x"
+                    }
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Block ${blockIndex + 1} ($repeatLabel)",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (actualText != null) {
+                            Text(
+                                actualText,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontStyle = FontStyle.Italic
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     block.intervals.forEach { interval ->
                         val minutes = interval.durationSeconds / 60
@@ -60,4 +90,10 @@ fun PlanSummaryScreen(
             Text("Back")
         }
     }
+}
+
+private fun formatDuration(totalSeconds: Int): String {
+    val m = totalSeconds / 60
+    val s = totalSeconds % 60
+    return "${m}m ${s}s"
 }

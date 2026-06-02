@@ -23,6 +23,7 @@ data class TimerSnapshot(
     // SystemClock.elapsedRealtime() when the current interval will hit zero.
     // null while paused or before the first tick — notification drops chronometer in that case.
     val endRealtimeMs: Long? = null,
+    val executions: List<BlockExecution> = emptyList(),
 ) {
     val currentBlock: IntervalBlock?
         get() = plan?.blocks?.getOrNull(blockIndex)
@@ -76,13 +77,21 @@ object TimerEngine {
         val plan = s.plan ?: return
         if (s.finished) return
         tickJob?.cancel()
+        val recorded = s.executions + BlockExecution(
+            blockIndex = s.blockIndex,
+            actualSeconds = s.blockElapsedSeconds,
+            completedPasses = s.blockPass,
+            completed = false,
+        )
         val nextBlockIndex = s.blockIndex + 1
         if (nextBlockIndex >= plan.blocks.size) {
+            _state.value = s.copy(executions = recorded)
             finish()
             return
         }
         val firstDur = plan.blocks[nextBlockIndex].intervals.firstOrNull()?.durationSeconds ?: 0
         _state.value = s.copy(
+            executions = recorded,
             blockIndex = nextBlockIndex,
             intervalIndex = 0,
             blockPass = 0,
@@ -95,6 +104,18 @@ object TimerEngine {
 
     fun stop() {
         tickJob?.cancel()
+        val s = _state.value
+        val plan = s.plan
+        if (plan != null && !s.finished && s.blockIndex < plan.blocks.size) {
+            _state.value = s.copy(
+                executions = s.executions + BlockExecution(
+                    blockIndex = s.blockIndex,
+                    actualSeconds = s.blockElapsedSeconds,
+                    completedPasses = s.blockPass,
+                    completed = false,
+                ),
+            )
+        }
         finish()
     }
 
@@ -194,7 +215,11 @@ object TimerEngine {
             } else {
                 val targetPasses = block.repeatCount ?: 1
                 val completedPasses = s.blockPass + 1
-                if (block.repeatIndefinitely || completedPasses < targetPasses) {
+                // Duration-capped blocks loop until the inner tick loop sees the
+                // budget hit and breaks with durationCutoff=true. Without this, the
+                // (block.repeatCount ?: 1) default would advance after one pass.
+                val loopForDuration = block.repeatDurationSeconds != null
+                if (block.repeatIndefinitely || loopForDuration || completedPasses < targetPasses) {
                     nextBlockIndex = s.blockIndex
                     nextIntervalIndex = 0
                     nextPass = completedPasses
@@ -208,12 +233,26 @@ object TimerEngine {
             }
         }
 
+        val newExecutions = if (resetBlockElapsed) {
+            // Pass-exhaustion path increments after completing the final interval;
+            // durationCutoff exits mid-pass, so the in-flight pass isn't counted.
+            val passesDone = if (durationCutoff) s.blockPass else s.blockPass + 1
+            s.executions + BlockExecution(
+                blockIndex = s.blockIndex,
+                actualSeconds = s.blockElapsedSeconds,
+                completedPasses = passesDone,
+                completed = true,
+            )
+        } else s.executions
+
         if (nextBlockIndex >= plan.blocks.size) {
+            _state.value = s.copy(executions = newExecutions)
             finish()
             return
         }
         val nextDur = plan.blocks[nextBlockIndex].intervals.firstOrNull()?.durationSeconds ?: 0
         _state.value = s.copy(
+            executions = newExecutions,
             blockIndex = nextBlockIndex,
             intervalIndex = nextIntervalIndex,
             blockPass = nextPass,

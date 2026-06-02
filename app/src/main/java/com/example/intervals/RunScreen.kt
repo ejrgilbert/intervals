@@ -20,7 +20,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
 @Composable
-fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
+fun RunScreen(plan: RunPlan, onFinish: (RunPlan, List<BlockExecution>) -> Unit) {
     val context = LocalContext.current
 
     // Prepare the engine for this plan unless it's already mid-run on the same plan.
@@ -37,7 +37,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     // but only when the finished state belongs to THIS plan — otherwise a leftover
     // finished=true from a previous run would skip us straight to summary.
     LaunchedEffect(snap.finished, snap.plan) {
-        if (snap.finished && snap.plan === plan) onFinish(plan)
+        if (snap.finished && snap.plan === plan) onFinish(plan, snap.executions)
     }
 
     val allBlocks = plan.blocks
