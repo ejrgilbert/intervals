@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -123,21 +124,65 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                 Text("${secondsRemaining}s", style = MaterialTheme.typography.displayLarge)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             val block = allBlocks[currentBlockIndex]
+            val curIntervalDur = block.intervals[currentIntervalIndex].durationSeconds
+            val curIntervalFrac = if (curIntervalDur > 0) {
+                ((curIntervalDur - secondsRemaining).toFloat() / curIntervalDur).coerceIn(0f, 1f)
+            } else 0f
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                allBlocks.forEachIndexed { index, b ->
+                    val fill: Float = when {
+                        index < currentBlockIndex -> 1f
+                        index > currentBlockIndex -> 0f
+                        b.repeatIndefinitely -> {
+                            val intervalsTotal = b.intervals.size.coerceAtLeast(1)
+                            ((currentIntervalIndex + curIntervalFrac) / intervalsTotal).coerceIn(0f, 1f)
+                        }
+                        else -> {
+                            val passes = (b.repeatCount ?: 1).coerceAtLeast(1)
+                            val intervalsTotal = b.intervals.size.coerceAtLeast(1)
+                            val units = (passes * intervalsTotal).toFloat()
+                            val done = currentBlockPass * intervalsTotal + currentIntervalIndex + curIntervalFrac
+                            (done / units).coerceIn(0f, 1f)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(fill)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             val repTotal = if (block.repeatIndefinitely) "∞" else (block.repeatCount ?: 1).toString()
             val progressParts = buildList {
-                if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
+                if (block.intervals.size > 1) add("Interval ${currentIntervalIndex + 1}/${block.intervals.size}")
                 if (block.repeatIndefinitely || (block.repeatCount ?: 1) > 1) {
                     add("Rep ${currentBlockPass + 1}/$repTotal")
                 }
-                if (block.intervals.size > 1) add("Interval ${currentIntervalIndex + 1}/${block.intervals.size}")
+                if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
             }
             if (progressParts.isNotEmpty()) {
                 Text(
                     progressParts.joinToString("  ·  "),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
