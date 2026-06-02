@@ -123,7 +123,26 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                 Text("${secondsRemaining}s", style = MaterialTheme.typography.displayLarge)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val block = allBlocks[currentBlockIndex]
+            val repTotal = if (block.repeatIndefinitely) "∞" else (block.repeatCount ?: 1).toString()
+            val progressParts = buildList {
+                if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
+                if (block.repeatIndefinitely || (block.repeatCount ?: 1) > 1) {
+                    add("Rep ${currentBlockPass + 1}/$repTotal")
+                }
+                if (block.intervals.size > 1) add("Interval ${currentIntervalIndex + 1}/${block.intervals.size}")
+            }
+            if (progressParts.isNotEmpty()) {
+                Text(
+                    progressParts.joinToString("  ·  "),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
 
             Row {
                 Button(onClick = { running = !running }) {
