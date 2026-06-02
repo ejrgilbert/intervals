@@ -17,6 +17,7 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -94,10 +95,14 @@ private val IntervalListSaver: Saver<SnapshotStateList<Interval>, String> = Save
 
 @Composable
 fun PlanEditorScreen(
-    onStartPlan: (List<IntervalBlock>) -> Unit
+    onStartPlan: (List<IntervalBlock>, Boolean) -> Unit
 ) {
+    val context = LocalContext.current
     val blocks = rememberSaveable(saver = IntervalBlockListSaver) { mutableStateListOf<IntervalBlock>() }
     val currentBlock = rememberSaveable(saver = IntervalListSaver) { mutableStateListOf<Interval>() }
+    var warnHalfway by rememberSaveable {
+        mutableStateOf(Settings.isWarnHalfwayEnabled(context))
+    }
 
     var intervalLabel by rememberSaveable { mutableStateOf("") }
     var minutes by rememberSaveable { mutableStateOf("0") }
@@ -481,6 +486,23 @@ fun PlanEditorScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Switch(
+                checked = warnHalfway,
+                onCheckedChange = {
+                    warnHalfway = it
+                    Settings.setWarnHalfwayEnabled(context, it)
+                }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Warn at halfway")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -510,7 +532,7 @@ fun PlanEditorScreen(
 
             // --- Start Plan Button (right) ---
             Button(
-                onClick = { onStartPlan(blocks) },
+                onClick = { onStartPlan(blocks, warnHalfway) },
                 enabled = blocks.any { it.intervals.isNotEmpty() }
             ) {
                 Text("Start Plan")

@@ -67,8 +67,12 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {
                         saveableStateHolder.SaveableStateProvider("plan-editor") {
-                            PlanEditorScreen { blocks ->
-                                currentPlan = RunPlan(name = "Custom Plan", blocks = blocks)
+                            PlanEditorScreen { blocks, warnHalfway ->
+                                currentPlan = RunPlan(
+                                    name = "Custom Plan",
+                                    blocks = blocks,
+                                    warnHalfway = warnHalfway,
+                                )
                             }
                         }
                     }

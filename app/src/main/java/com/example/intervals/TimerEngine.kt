@@ -24,6 +24,10 @@ data class TimerSnapshot(
     // null while paused or before the first tick — notification drops chronometer in that case.
     val endRealtimeMs: Long? = null,
     val executions: List<BlockExecution> = emptyList(),
+    // Total run seconds at which to fire the halfway cue; null disables it
+    // (toggle off or plan has an infinite block).
+    val halfwayThresholdSeconds: Int? = null,
+    val halfwayAnnounced: Boolean = false,
 ) {
     val currentBlock: IntervalBlock?
         get() = plan?.blocks?.getOrNull(blockIndex)
@@ -52,11 +56,13 @@ object TimerEngine {
     fun prepare(plan: RunPlan) {
         tickJob?.cancel()
         val firstDur = plan.blocks.firstOrNull()?.intervals?.firstOrNull()?.durationSeconds ?: 0
+        val halfway = if (plan.warnHalfway) plan.totalPlannedSecondsOrNull()?.let { it / 2 } else null
         _state.value = TimerSnapshot(
             plan = plan,
             secondsRemaining = firstDur,
             running = false,
             endRealtimeMs = null,
+            halfwayThresholdSeconds = halfway,
         )
     }
 
@@ -130,6 +136,17 @@ object TimerEngine {
         onFinished?.invoke()
     }
 
+    // Beep + spoken "halfway" matches the existing beep-then-announce pattern
+    // used at interval starts. When `waitForFinish` is true, suspends long enough
+    // for the TTS utterance to complete — used when an interval transition is
+    // imminent, so the next interval's QUEUE_FLUSH speak doesn't cut it off.
+    private suspend fun announceHalfway(waitForFinish: Boolean = false) {
+        beep?.invoke()
+        delay(300)
+        speak?.invoke("halfway")
+        if (waitForFinish) delay(1200)
+    }
+
     private fun runLoop() {
         tickJob = scope.launch {
             while (true) {
@@ -159,12 +176,19 @@ object TimerEngine {
                     val segmentElapsedSec = ((now - segmentStart) / 1000).toInt()
                     val curBlockElapsed = baseBlockElapsed + segmentElapsedSec
 
+                    val threshold = cur.halfwayThresholdSeconds
+                    val crossingHalfway = !cur.halfwayAnnounced && threshold != null &&
+                            cur.executions.sumOf { it.actualSeconds } + curBlockElapsed >= threshold
+                    val newHalfwayAnnounced = cur.halfwayAnnounced || crossingHalfway
+
                     val budget = block.repeatDurationSeconds
                     if (budget != null && curBlockElapsed >= budget) {
                         _state.value = cur.copy(
                             blockElapsedSeconds = budget,
                             secondsRemaining = 0,
+                            halfwayAnnounced = newHalfwayAnnounced,
                         )
+                        if (crossingHalfway) announceHalfway(waitForFinish = true)
                         durationCutoff = true
                         break
                     }
@@ -172,14 +196,18 @@ object TimerEngine {
                         _state.value = cur.copy(
                             blockElapsedSeconds = curBlockElapsed,
                             secondsRemaining = 0,
+                            halfwayAnnounced = newHalfwayAnnounced,
                         )
+                        if (crossingHalfway) announceHalfway(waitForFinish = true)
                         break
                     }
                     _state.value = cur.copy(
                         blockElapsedSeconds = curBlockElapsed,
                         // Round up so we display "1s" until we actually hit zero.
                         secondsRemaining = ((msLeft + 999) / 1000).toInt(),
+                        halfwayAnnounced = newHalfwayAnnounced,
                     )
+                    if (crossingHalfway) announceHalfway()
                     delay(msLeft.coerceAtMost(250L))
                 }
 

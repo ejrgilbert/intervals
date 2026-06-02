@@ -21,8 +21,21 @@ data class IntervalBlock(
 // Represents a full running plan composed of multiple blocks
 data class RunPlan(
     val name: String,
-    val blocks: List<IntervalBlock>
+    val blocks: List<IntervalBlock>,
+    val warnHalfway: Boolean = false,
 )
+
+// Total planned seconds for a run; null when an infinite block makes it
+// unbounded (and thus "halfway" is undefined).
+fun RunPlan.totalPlannedSecondsOrNull(): Int? {
+    var total = 0
+    for (b in blocks) {
+        if (b.repeatIndefinitely) return null
+        val intervalSum = b.intervals.sumOf { it.durationSeconds }
+        total += b.repeatDurationSeconds ?: (intervalSum * (b.repeatCount ?: 1))
+    }
+    return total
+}
 
 // Records what actually happened on one block during a run.
 // `completed` is true when the block ended on its own (passes exhausted or
