@@ -99,7 +99,13 @@ object TimerEngine {
     }
 
     private fun finish() {
-        _state.value = TimerSnapshot(finished = true)
+        // Preserve plan so RunScreen can tell this finished state belongs to the
+        // plan it was watching, vs. a leftover from a previous run.
+        _state.value = _state.value.copy(
+            finished = true,
+            running = false,
+            endRealtimeMs = null,
+        )
         onFinished?.invoke()
     }
 

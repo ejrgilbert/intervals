@@ -33,9 +33,11 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
 
     val snap by TimerEngine.state.collectAsStateWithLifecycle()
 
-    // Engine sets finished=true on natural completion or explicit stop. Bubble up.
-    LaunchedEffect(snap.finished) {
-        if (snap.finished) onFinish(plan)
+    // Engine sets finished=true on natural completion or explicit stop. Bubble up,
+    // but only when the finished state belongs to THIS plan — otherwise a leftover
+    // finished=true from a previous run would skip us straight to summary.
+    LaunchedEffect(snap.finished, snap.plan) {
+        if (snap.finished && snap.plan === plan) onFinish(plan)
     }
 
     val allBlocks = plan.blocks
