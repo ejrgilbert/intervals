@@ -48,6 +48,7 @@ private fun IntervalBlock.toJson(): JSONObject = JSONObject().apply {
     put("intervals", arr)
     put("repeatIndefinitely", repeatIndefinitely)
     if (repeatCount != null) put("repeatCount", repeatCount)
+    if (repeatDurationSeconds != null) put("repeatDurationSeconds", repeatDurationSeconds)
 }
 
 private fun JSONObject.toIntervalBlock(): IntervalBlock {
@@ -55,7 +56,20 @@ private fun JSONObject.toIntervalBlock(): IntervalBlock {
     val intervals = List(arr.length()) { arr.getJSONObject(it).toInterval() }
     val indefinitely = optBoolean("repeatIndefinitely", false)
     val count = if (has("repeatCount")) getInt("repeatCount") else null
-    return IntervalBlock(intervals, indefinitely, count)
+    val durSecs = if (has("repeatDurationSeconds")) getInt("repeatDurationSeconds") else null
+    return IntervalBlock(intervals, indefinitely, count, durSecs)
+}
+
+private enum class RepeatMode { TIMES, DURATION, INFINITE }
+
+private fun IntervalBlock.repeatLabel(): String = when {
+    repeatIndefinitely -> "∞"
+    repeatDurationSeconds != null -> {
+        val m = repeatDurationSeconds / 60
+        val s = repeatDurationSeconds % 60
+        if (s == 0) "${m}m" else "${m}m ${s}s"
+    }
+    else -> "${repeatCount ?: 1}x"
 }
 
 private val IntervalBlockListSaver: Saver<SnapshotStateList<IntervalBlock>, String> = Saver(
@@ -90,8 +104,11 @@ fun PlanEditorScreen(
     var seconds by rememberSaveable { mutableStateOf("0") }
 
     // --- Repeat configuration ---
-    var repeatIndefinitely by rememberSaveable { mutableStateOf(false) }
-    var repeatCount by rememberSaveable { mutableStateOf("1") } // default 1 for finite
+    var repeatModeName by rememberSaveable { mutableStateOf(RepeatMode.TIMES.name) }
+    val repeatMode = RepeatMode.valueOf(repeatModeName)
+    var repeatCount by rememberSaveable { mutableStateOf("1") } // for TIMES
+    var repeatMinutes by rememberSaveable { mutableStateOf("5") } // for DURATION
+    var repeatSeconds by rememberSaveable { mutableStateOf("0") } // for DURATION
 
     // null when adding a new block; index into `blocks` when editing an existing one.
     var editingBlockIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -221,68 +238,122 @@ fun PlanEditorScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // --- Finish Block + Repeat config ---
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                val modes = listOf(RepeatMode.TIMES, RepeatMode.DURATION, RepeatMode.INFINITE)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    modes.forEachIndexed { idx, mode ->
+                        SegmentedButton(
+                            selected = repeatMode == mode,
+                            onClick = { repeatModeName = mode.name },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size)
+                        ) {
+                            Text(
+                                when (mode) {
+                                    RepeatMode.TIMES -> "Times"
+                                    RepeatMode.DURATION -> "Minutes"
+                                    RepeatMode.INFINITE -> "∞"
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-
-                    if (!repeatIndefinitely) {
-                        OutlinedTextField(
-                            value = repeatCount,
-                            onValueChange = { if (it.all { c -> c.isDigit() }) repeatCount = it },
-                            label = { Text("Times") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.width(80.dp)
-                        )
+                    when (repeatMode) {
+                        RepeatMode.TIMES -> {
+                            OutlinedTextField(
+                                value = repeatCount,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) repeatCount = it },
+                                label = { Text("Times") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.width(80.dp)
+                            )
+                        }
+                        RepeatMode.DURATION -> {
+                            OutlinedTextField(
+                                value = repeatMinutes,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) repeatMinutes = it },
+                                label = { Text("Min") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.width(80.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedTextField(
+                                value = repeatSeconds,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) repeatSeconds = it },
+                                label = { Text("Sec") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.width(80.dp)
+                            )
+                        }
+                        RepeatMode.INFINITE -> {
+                            Text("Repeats forever", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                    Checkbox(checked = repeatIndefinitely, onCheckedChange = { repeatIndefinitely = it })
-                    Text("∞")
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Button(
-                    onClick = {
-                        if (currentBlock.isNotEmpty()) {
-                            val block = if (repeatIndefinitely) {
-                                IntervalBlock(currentBlock.toList(), repeatIndefinitely = true)
-                            } else {
-                                IntervalBlock(currentBlock.toList(), repeatCount = repeatCount.toIntOrNull() ?: 1)
+                    Button(
+                        onClick = {
+                            if (currentBlock.isNotEmpty()) {
+                                val block = when (repeatMode) {
+                                    RepeatMode.INFINITE ->
+                                        IntervalBlock(currentBlock.toList(), repeatIndefinitely = true)
+                                    RepeatMode.DURATION -> {
+                                        val total = (repeatMinutes.toIntOrNull() ?: 0) * 60 +
+                                                (repeatSeconds.toIntOrNull() ?: 0)
+                                        IntervalBlock(
+                                            currentBlock.toList(),
+                                            repeatDurationSeconds = total.coerceAtLeast(1)
+                                        )
+                                    }
+                                    RepeatMode.TIMES ->
+                                        IntervalBlock(
+                                            currentBlock.toList(),
+                                            repeatCount = (repeatCount.toIntOrNull() ?: 1).coerceAtLeast(1)
+                                        )
+                                }
+                                val editIdx = editingBlockIndex
+                                if (editIdx != null) {
+                                    blocks[editIdx] = block
+                                } else {
+                                    blocks.add(block)
+                                }
+                                currentBlock.clear()
+                                repeatModeName = RepeatMode.TIMES.name
+                                repeatCount = "1"
+                                repeatMinutes = "5"
+                                repeatSeconds = "0"
+                                editingBlockIndex = null
+                                editingIntervalIndex = null
                             }
-                            val editIdx = editingBlockIndex
-                            if (editIdx != null) {
-                                blocks[editIdx] = block
-                            } else {
-                                blocks.add(block)
-                            }
+                        },
+                        enabled = editingIntervalIndex == null
+                    ) {
+                        Text(if (editingBlockIndex != null) "Save" else "Finish Block")
+                    }
+
+                    if (editingBlockIndex != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(onClick = {
                             currentBlock.clear()
-                            repeatIndefinitely = false
+                            repeatModeName = RepeatMode.TIMES.name
                             repeatCount = "1"
+                            repeatMinutes = "5"
+                            repeatSeconds = "0"
                             editingBlockIndex = null
                             editingIntervalIndex = null
+                            intervalLabel = ""
+                            minutes = "0"
+                            seconds = "0"
+                        }) {
+                            Text("Cancel")
                         }
-                    },
-                    enabled = editingIntervalIndex == null
-                ) {
-                    Text(if (editingBlockIndex != null) "Save" else "Finish Block")
-                }
-
-                if (editingBlockIndex != null) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    OutlinedButton(onClick = {
-                        currentBlock.clear()
-                        repeatIndefinitely = false
-                        repeatCount = "1"
-                        editingBlockIndex = null
-                        editingIntervalIndex = null
-                        intervalLabel = ""
-                        minutes = "0"
-                        seconds = "0"
-                    }) {
-                        Text("Cancel")
                     }
                 }
             }
@@ -321,7 +392,7 @@ fun PlanEditorScreen(
 
                                 .padding(8.dp)) {
                             Text(
-                                "Block ${blockIndex + 1} (${if (block.repeatIndefinitely) "∞" else "${block.repeatCount}x"})",
+                                "Block ${blockIndex + 1} (${block.repeatLabel()})",
                                 modifier = Modifier.weight(1f),
                                 fontWeight = FontWeight.Bold
                             )
@@ -329,8 +400,20 @@ fun PlanEditorScreen(
                                 onClick = {
                                     currentBlock.clear()
                                     currentBlock.addAll(block.intervals)
-                                    repeatIndefinitely = block.repeatIndefinitely
-                                    repeatCount = (block.repeatCount ?: 1).toString()
+                                    when {
+                                        block.repeatIndefinitely -> {
+                                            repeatModeName = RepeatMode.INFINITE.name
+                                        }
+                                        block.repeatDurationSeconds != null -> {
+                                            repeatModeName = RepeatMode.DURATION.name
+                                            repeatMinutes = (block.repeatDurationSeconds / 60).toString()
+                                            repeatSeconds = (block.repeatDurationSeconds % 60).toString()
+                                        }
+                                        else -> {
+                                            repeatModeName = RepeatMode.TIMES.name
+                                            repeatCount = (block.repeatCount ?: 1).toString()
+                                        }
+                                    }
                                     editingBlockIndex = blockIndex
                                 },
                                 enabled = canStartEditing
@@ -450,8 +533,10 @@ fun PlanEditorScreen(
                 intervalLabel = ""
                 minutes = "0"
                 seconds = "0"
-                repeatIndefinitely = false
+                repeatModeName = RepeatMode.TIMES.name
                 repeatCount = "1"
+                repeatMinutes = "5"
+                repeatSeconds = "0"
                 editingBlockIndex = null
                 editingIntervalIndex = null
                 isHoldingClear = false

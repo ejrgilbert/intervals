@@ -7,12 +7,15 @@ data class Interval(
 )
 
 // Represents a block of intervals
-// repeatIndefinitely = true → repeats forever
-// repeatCount = optional finite number of repeats
+// Exactly one repeat mode is active:
+//   repeatIndefinitely = true        → cycle forever
+//   repeatDurationSeconds != null    → cycle until N seconds of block time elapse (cut short mid-interval)
+//   repeatCount != null              → cycle a fixed number of times (default)
 data class IntervalBlock(
     val intervals: List<Interval>,
     val repeatIndefinitely: Boolean = false,
-    val repeatCount: Int? = null
+    val repeatCount: Int? = null,
+    val repeatDurationSeconds: Int? = null
 )
 
 // Represents a full running plan composed of multiple blocks

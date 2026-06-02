@@ -27,8 +27,17 @@ fun PlanSummaryScreen(
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
                 ) {
+                    val repeatLabel = when {
+                        block.repeatIndefinitely -> "∞"
+                        block.repeatDurationSeconds != null -> {
+                            val m = block.repeatDurationSeconds / 60
+                            val s = block.repeatDurationSeconds % 60
+                            if (s == 0) "${m}m" else "${m}m ${s}s"
+                        }
+                        else -> "${block.repeatCount}x"
+                    }
                     Text(
-                        "Block ${blockIndex + 1} (${if (block.repeatIndefinitely) "∞" else "${block.repeatCount}x"})",
+                        "Block ${blockIndex + 1} ($repeatLabel)",
                         style = MaterialTheme.typography.titleMedium
                     )
 

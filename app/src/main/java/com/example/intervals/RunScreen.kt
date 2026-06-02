@@ -35,6 +35,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     var currentBlockIndex by remember { mutableStateOf(0) }
     var currentIntervalIndex by remember { mutableStateOf(0) }
     var currentBlockPass by remember { mutableStateOf(0) }
+    var blockElapsedSeconds by remember { mutableStateOf(0) }
     var secondsRemaining by remember {
         mutableStateOf(allBlocks.firstOrNull()?.intervals?.firstOrNull()?.durationSeconds ?: 0)
     }
@@ -56,34 +57,63 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             // Speak the interval label
             tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
 
-            val endAt = SystemClock.elapsedRealtime() + secondsRemaining * 1000L
+            val segmentStart = SystemClock.elapsedRealtime()
+            val baseBlockElapsed = blockElapsedSeconds
+            val endAt = segmentStart + secondsRemaining * 1000L
+            var durationCutoff = false
             while (running) {
-                val msLeft = endAt - SystemClock.elapsedRealtime()
+                val now = SystemClock.elapsedRealtime()
+                val msLeft = endAt - now
+                val segmentElapsedSec = ((now - segmentStart) / 1000).toInt()
+                val curBlockElapsed = baseBlockElapsed + segmentElapsedSec
+
+                val budget = block.repeatDurationSeconds
+                if (budget != null && curBlockElapsed >= budget) {
+                    blockElapsedSeconds = budget
+                    secondsRemaining = 0
+                    durationCutoff = true
+                    break
+                }
                 if (msLeft <= 0) {
+                    blockElapsedSeconds = curBlockElapsed
                     secondsRemaining = 0
                     break
                 }
+                blockElapsedSeconds = curBlockElapsed
                 // Round up so we display "1s" until the moment we hit zero,
                 // rather than dropping to 0 with a full second still to go.
                 secondsRemaining = ((msLeft + 999) / 1000).toInt()
                 delay(msLeft.coerceAtMost(250L))
             }
 
-            // Move to next interval
-            currentIntervalIndex++
-            if (currentIntervalIndex >= block.intervals.size) {
+            // Advance — to next block if duration was cut short, else next interval.
+            if (durationCutoff) {
+                currentBlockPass = 0
                 currentIntervalIndex = 0
-                val targetPasses = block.repeatCount ?: 1
-                val completedPasses = currentBlockPass + 1
-                if (block.repeatIndefinitely || completedPasses < targetPasses) {
-                    currentBlockPass = completedPasses
-                } else {
-                    currentBlockPass = 0
-                    currentBlockIndex++
-                    if (currentBlockIndex >= allBlocks.size) {
-                        running = false
-                        onFinish(plan)
-                        return@LaunchedEffect
+                blockElapsedSeconds = 0
+                currentBlockIndex++
+                if (currentBlockIndex >= allBlocks.size) {
+                    running = false
+                    onFinish(plan)
+                    return@LaunchedEffect
+                }
+            } else {
+                currentIntervalIndex++
+                if (currentIntervalIndex >= block.intervals.size) {
+                    currentIntervalIndex = 0
+                    val targetPasses = block.repeatCount ?: 1
+                    val completedPasses = currentBlockPass + 1
+                    if (block.repeatIndefinitely || completedPasses < targetPasses) {
+                        currentBlockPass = completedPasses
+                    } else {
+                        currentBlockPass = 0
+                        blockElapsedSeconds = 0
+                        currentBlockIndex++
+                        if (currentBlockIndex >= allBlocks.size) {
+                            running = false
+                            onFinish(plan)
+                            return@LaunchedEffect
+                        }
                     }
                 }
             }
@@ -125,6 +155,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             } else {
                 currentBlockPass = 0
                 currentIntervalIndex = 0
+                blockElapsedSeconds = 0
                 currentBlockIndex = nextBlockIndex
                 secondsRemaining = allBlocks[nextBlockIndex].intervals.firstOrNull()?.durationSeconds ?: 0
             }
@@ -173,6 +204,10 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                             val intervalsTotal = b.intervals.size.coerceAtLeast(1)
                             ((currentIntervalIndex + curIntervalFrac) / intervalsTotal).coerceIn(0f, 1f)
                         }
+                        b.repeatDurationSeconds != null -> {
+                            val budget = b.repeatDurationSeconds.coerceAtLeast(1).toFloat()
+                            (blockElapsedSeconds.toFloat() / budget).coerceIn(0f, 1f)
+                        }
                         else -> {
                             val passes = (b.repeatCount ?: 1).coerceAtLeast(1)
                             val intervalsTotal = b.intervals.size.coerceAtLeast(1)
@@ -200,11 +235,24 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            val repTotal = if (block.repeatIndefinitely) "∞" else (block.repeatCount ?: 1).toString()
             val progressParts = buildList {
                 if (block.intervals.size > 1) add("Interval ${currentIntervalIndex + 1}/${block.intervals.size}")
-                if (block.repeatIndefinitely || (block.repeatCount ?: 1) > 1) {
-                    add("Rep ${currentBlockPass + 1}/$repTotal")
+                val showRep = block.repeatIndefinitely ||
+                        block.repeatDurationSeconds != null ||
+                        (block.repeatCount ?: 1) > 1
+                if (showRep) {
+                    val repTotal = when {
+                        block.repeatIndefinitely -> "∞"
+                        block.repeatDurationSeconds != null -> null
+                        else -> (block.repeatCount ?: 1).toString()
+                    }
+                    add(if (repTotal != null) "Rep ${currentBlockPass + 1}/$repTotal" else "Rep ${currentBlockPass + 1}")
+                }
+                block.repeatDurationSeconds?.let { budget ->
+                    val left = (budget - blockElapsedSeconds).coerceAtLeast(0)
+                    val m = left / 60
+                    val s = left % 60
+                    add(if (m > 0) "${m}m ${s}s left" else "${s}s left")
                 }
                 if (allBlocks.size > 1) add("Block ${currentBlockIndex + 1}/${allBlocks.size}")
             }
