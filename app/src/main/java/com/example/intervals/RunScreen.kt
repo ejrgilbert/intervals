@@ -1,5 +1,7 @@
 package com.example.intervalrunner
 
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.background
@@ -24,11 +26,17 @@ import java.util.Locale
 @Composable
 fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
     val context = LocalContext.current
+    var ttsReady by remember { mutableStateOf(false) }
     val tts = remember {
-        TextToSpeech(context, null)
+        TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) ttsReady = true
+        }
     }
-    LaunchedEffect(tts) {
-        tts.language = Locale.US
+    LaunchedEffect(ttsReady) {
+        if (ttsReady) tts.language = Locale.US
+    }
+    val toneGenerator = remember {
+        runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }.getOrNull()
     }
 
     val allBlocks = plan.blocks
@@ -54,8 +62,12 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             val block = allBlocks[currentBlockIndex]
             val interval = block.intervals[currentIntervalIndex]
 
-            // Speak the interval label
-            tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
+            // Beep, then announce the interval label
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
+            delay(300)
+            if (ttsReady) {
+                tts.speak(interval.label, TextToSpeech.QUEUE_FLUSH, null, null)
+            }
 
             val segmentStart = SystemClock.elapsedRealtime()
             val baseBlockElapsed = blockElapsedSeconds
@@ -355,6 +367,7 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
         onDispose {
             tts.stop()
             tts.shutdown()
+            toneGenerator?.release()
         }
     }
 }

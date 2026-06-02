@@ -12,7 +12,6 @@ GH app and downloading the release.
 
 easy:
 - [ ] add an icon for the app (just the default right now)
-- [ ] make the timer _ding_, then announce the label
 
 medium:
 - [ ] show the time that's left for the timer with the label on my lock screen
