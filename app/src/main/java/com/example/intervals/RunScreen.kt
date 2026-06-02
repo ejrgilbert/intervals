@@ -3,6 +3,7 @@ package com.example.intervalrunner
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,7 +15,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -39,6 +42,9 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
 
     var isHoldingStop by remember { mutableStateOf(false) }
     var stopProgress by remember { mutableStateOf(0f) }
+
+    var isHoldingSkip by remember { mutableStateOf(false) }
+    var skipProgress by remember { mutableStateOf(0f) }
 
     // --- Countdown timer ---
     LaunchedEffect(running, currentBlockIndex, currentIntervalIndex, currentBlockPass) {
@@ -101,6 +107,29 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             onFinish(plan)
             isHoldingStop = false
         } else stopProgress = 0f
+    }
+
+    // --- Hold-to-skip-block logic ---
+    LaunchedEffect(isHoldingSkip) {
+        if (isHoldingSkip) {
+            skipProgress = 0f
+            val steps = 10
+            repeat(steps) {
+                skipProgress += 1f / steps
+                delay(50)
+            }
+            val nextBlockIndex = currentBlockIndex + 1
+            if (nextBlockIndex >= allBlocks.size) {
+                running = false
+                onFinish(plan)
+            } else {
+                currentBlockPass = 0
+                currentIntervalIndex = 0
+                currentBlockIndex = nextBlockIndex
+                secondsRemaining = allBlocks[nextBlockIndex].intervals.firstOrNull()?.durationSeconds ?: 0
+            }
+            isHoldingSkip = false
+        } else skipProgress = 0f
     }
 
     val currentInterval = allBlocks.getOrNull(currentBlockIndex)?.intervals?.getOrNull(currentIntervalIndex)
@@ -190,8 +219,48 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
             Spacer(modifier = Modifier.height(24.dp))
 
             Row {
-                Button(onClick = { running = !running }) {
-                    Text(if (running) "Pause" else "Start")
+                Box(
+                    modifier = Modifier
+                        .height(56.dp)
+                        .width(100.dp)
+                        .clickable { running = !running }
+                        .background(
+                            color = Color(0xFF4CAF50),
+                            shape = RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (running) "Pause" else "Start",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Box(
+                    modifier = Modifier
+                        .height(56.dp)
+                        .width(100.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onLongPress = { isHoldingSkip = true })
+                        }
+                        .background(
+                            color = if (isHoldingSkip) {
+                                Color(0xFFFF9800).copy(alpha = 0.5f + 0.5f * skipProgress)
+                            } else Color(0xFFFF9800),
+                            shape = RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        ">>",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
@@ -209,13 +278,27 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan) -> Unit) {
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Stop", color = Color.White)
+                    Text(
+                        "Stop",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
             if (isHoldingStop) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(progress = stopProgress, modifier = Modifier.fillMaxWidth().height(4.dp))
+            }
+
+            if (isHoldingSkip) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = skipProgress,
+                    color = Color(0xFFFF9800),
+                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                )
             }
         }
     }
