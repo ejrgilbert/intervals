@@ -9,6 +9,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -16,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,20 +33,64 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
+private fun Interval.toJson(): JSONObject = JSONObject().apply {
+    put("label", label)
+    put("duration", durationSeconds)
+}
+
+private fun JSONObject.toInterval(): Interval =
+    Interval(getString("label"), getInt("duration"))
+
+private fun IntervalBlock.toJson(): JSONObject = JSONObject().apply {
+    val arr = JSONArray()
+    intervals.forEach { arr.put(it.toJson()) }
+    put("intervals", arr)
+    put("repeatIndefinitely", repeatIndefinitely)
+    if (repeatCount != null) put("repeatCount", repeatCount)
+}
+
+private fun JSONObject.toIntervalBlock(): IntervalBlock {
+    val arr = getJSONArray("intervals")
+    val intervals = List(arr.length()) { arr.getJSONObject(it).toInterval() }
+    val indefinitely = optBoolean("repeatIndefinitely", false)
+    val count = if (has("repeatCount")) getInt("repeatCount") else null
+    return IntervalBlock(intervals, indefinitely, count)
+}
+
+private val IntervalBlockListSaver: Saver<SnapshotStateList<IntervalBlock>, String> = Saver(
+    save = { list ->
+        JSONArray().apply { list.forEach { put(it.toJson()) } }.toString()
+    },
+    restore = { json ->
+        val arr = JSONArray(json)
+        List(arr.length()) { arr.getJSONObject(it).toIntervalBlock() }.toMutableStateList()
+    }
+)
+
+private val IntervalListSaver: Saver<SnapshotStateList<Interval>, String> = Saver(
+    save = { list ->
+        JSONArray().apply { list.forEach { put(it.toJson()) } }.toString()
+    },
+    restore = { json ->
+        val arr = JSONArray(json)
+        List(arr.length()) { arr.getJSONObject(it).toInterval() }.toMutableStateList()
+    }
+)
+
 @Composable
 fun PlanEditorScreen(
     onStartPlan: (List<IntervalBlock>) -> Unit
 ) {
-    val blocks = remember { mutableStateListOf<IntervalBlock>() }
-    val currentBlock = remember { mutableStateListOf<Interval>() }
+    val blocks = rememberSaveable(saver = IntervalBlockListSaver) { mutableStateListOf<IntervalBlock>() }
+    val currentBlock = rememberSaveable(saver = IntervalListSaver) { mutableStateListOf<Interval>() }
 
-    var intervalLabel by remember { mutableStateOf("") }
-    var minutes by remember { mutableStateOf("0") }
-    var seconds by remember { mutableStateOf("0") }
+    var intervalLabel by rememberSaveable { mutableStateOf("") }
+    var minutes by rememberSaveable { mutableStateOf("0") }
+    var seconds by rememberSaveable { mutableStateOf("0") }
 
     // --- Repeat configuration ---
-    var repeatIndefinitely by remember { mutableStateOf(false) }
-    var repeatCount by remember { mutableStateOf("1") } // default 1 for finite
+    var repeatIndefinitely by rememberSaveable { mutableStateOf(false) }
+    var repeatCount by rememberSaveable { mutableStateOf("1") } // default 1 for finite
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Create Interval Plan", style = MaterialTheme.typography.headlineMedium)
