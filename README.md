@@ -10,16 +10,7 @@ GH app and downloading the release.
 
 # ideas
 
-easy:
-- [ ] add an icon for the app (just the default right now)
-
-medium:
-- [ ] show the time that's left for the timer with the label on my lock screen
 - [ ] figure out how to save run setups and create overarching plans to follow
-
-hard:
-- [ ] run tracker (where did i go?)
-
 
 # build
 1. Open your project in Android Studio.
