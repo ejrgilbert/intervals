@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -92,6 +93,12 @@ fun PlanEditorScreen(
     var repeatIndefinitely by rememberSaveable { mutableStateOf(false) }
     var repeatCount by rememberSaveable { mutableStateOf("1") } // default 1 for finite
 
+    // null when adding a new block; index into `blocks` when editing an existing one.
+    var editingBlockIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+
+    // null when adding a new interval; index into `currentBlock` when editing one.
+    var editingIntervalIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Create Interval Plan", style = MaterialTheme.typography.headlineMedium)
 
@@ -130,16 +137,37 @@ fun PlanEditorScreen(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Button(onClick = {
-                val totalSeconds = (minutes.toIntOrNull() ?: 0) * 60 + (seconds.toIntOrNull() ?: 0)
-                if (intervalLabel.isNotBlank() && totalSeconds > 0) {
-                    currentBlock.add(Interval(intervalLabel, totalSeconds))
-                    intervalLabel = ""
-                    minutes = "0"
-                    seconds = "0"
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Button(onClick = {
+                    val totalSeconds = (minutes.toIntOrNull() ?: 0) * 60 + (seconds.toIntOrNull() ?: 0)
+                    if (intervalLabel.isNotBlank() && totalSeconds > 0) {
+                        val newInterval = Interval(intervalLabel, totalSeconds)
+                        val editIdx = editingIntervalIndex
+                        if (editIdx != null && editIdx in currentBlock.indices) {
+                            currentBlock[editIdx] = newInterval
+                            editingIntervalIndex = null
+                        } else {
+                            currentBlock.add(newInterval)
+                        }
+                        intervalLabel = ""
+                        minutes = "0"
+                        seconds = "0"
+                    }
+                }) {
+                    Text(if (editingIntervalIndex != null) "Save" else "Add Interval")
                 }
-            }) {
-                Text("Add Interval")
+
+                if (editingIntervalIndex != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(onClick = {
+                        editingIntervalIndex = null
+                        intervalLabel = ""
+                        minutes = "0"
+                        seconds = "0"
+                    }) {
+                        Text("Cancel")
+                    }
+                }
             }
         }
 
@@ -147,10 +175,15 @@ fun PlanEditorScreen(
 
         // --- Current block preview ---
         if (currentBlock.isNotEmpty()) {
-            Text("Current Block Intervals", style = MaterialTheme.typography.titleMedium)
+            Text(
+                editingBlockIndex?.let { "Editing Block ${it + 1}" } ?: "Current Block Intervals",
+                style = MaterialTheme.typography.titleMedium
+            )
 
             LazyColumn {
                 itemsIndexed(currentBlock) { index, interval ->
+                    val editingThisInterval = editingIntervalIndex == index
+                    val editingOtherInterval = editingIntervalIndex != null && !editingThisInterval
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -164,7 +197,21 @@ fun PlanEditorScreen(
                     )
                     ) {
                         Text("${interval.label}: ${interval.durationSeconds} sec", modifier = Modifier.weight(1f))
-                        IconButton(onClick = { currentBlock.removeAt(index) }) {
+                        IconButton(
+                            onClick = {
+                                intervalLabel = interval.label
+                                minutes = (interval.durationSeconds / 60).toString()
+                                seconds = (interval.durationSeconds % 60).toString()
+                                editingIntervalIndex = index
+                            },
+                            enabled = !editingOtherInterval
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit interval")
+                        }
+                        IconButton(
+                            onClick = { currentBlock.removeAt(index) },
+                            enabled = !editingThisInterval && !editingOtherInterval
+                        ) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete interval")
                         }
                     }
@@ -197,20 +244,46 @@ fun PlanEditorScreen(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                Button(onClick = {
-                    if (currentBlock.isNotEmpty()) {
-                        val block = if (repeatIndefinitely) {
-                            IntervalBlock(currentBlock.toList(), repeatIndefinitely = true)
-                        } else {
-                            IntervalBlock(currentBlock.toList(), repeatCount = repeatCount.toIntOrNull() ?: 1)
+                Button(
+                    onClick = {
+                        if (currentBlock.isNotEmpty()) {
+                            val block = if (repeatIndefinitely) {
+                                IntervalBlock(currentBlock.toList(), repeatIndefinitely = true)
+                            } else {
+                                IntervalBlock(currentBlock.toList(), repeatCount = repeatCount.toIntOrNull() ?: 1)
+                            }
+                            val editIdx = editingBlockIndex
+                            if (editIdx != null) {
+                                blocks[editIdx] = block
+                            } else {
+                                blocks.add(block)
+                            }
+                            currentBlock.clear()
+                            repeatIndefinitely = false
+                            repeatCount = "1"
+                            editingBlockIndex = null
+                            editingIntervalIndex = null
                         }
-                        blocks.add(block)
+                    },
+                    enabled = editingIntervalIndex == null
+                ) {
+                    Text(if (editingBlockIndex != null) "Save" else "Finish Block")
+                }
+
+                if (editingBlockIndex != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(onClick = {
                         currentBlock.clear()
                         repeatIndefinitely = false
                         repeatCount = "1"
+                        editingBlockIndex = null
+                        editingIntervalIndex = null
+                        intervalLabel = ""
+                        minutes = "0"
+                        seconds = "0"
+                    }) {
+                        Text("Cancel")
                     }
-                }) {
-                    Text("Finish Block")
                 }
             }
 
@@ -237,6 +310,10 @@ fun PlanEditorScreen(
                             .background(MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small)
                             .padding(8.dp)
                     ) {
+                        val isEditingThis = editingBlockIndex == blockIndex
+                        val isEditingOther = editingBlockIndex != null && !isEditingThis
+                        val canStartEditing = currentBlock.isEmpty() && editingBlockIndex == null
+
                         Row(verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -248,29 +325,55 @@ fun PlanEditorScreen(
                                 modifier = Modifier.weight(1f),
                                 fontWeight = FontWeight.Bold
                             )
-                            IconButton(onClick = { blocks.removeAt(blockIndex) }) {
+                            IconButton(
+                                onClick = {
+                                    currentBlock.clear()
+                                    currentBlock.addAll(block.intervals)
+                                    repeatIndefinitely = block.repeatIndefinitely
+                                    repeatCount = (block.repeatCount ?: 1).toString()
+                                    editingBlockIndex = blockIndex
+                                },
+                                enabled = canStartEditing
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Block")
+                            }
+                            IconButton(
+                                onClick = { blocks.removeAt(blockIndex) },
+                                enabled = !isEditingOther && !isEditingThis
+                            ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete Block")
                             }
                         }
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        block.intervals.forEachIndexed { intervalIndex, interval ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("${interval.label}: ${interval.durationSeconds} sec", modifier = Modifier.weight(1f))
-                                IconButton(onClick = {
-                                    val mutableIntervals = block.intervals.toMutableList()
-                                    mutableIntervals.removeAt(intervalIndex)
-                                    if (mutableIntervals.isEmpty()) {
-                                        blocks.removeAt(blockIndex)
-                                    } else {
-                                        blocks[blockIndex] = block.copy(intervals = mutableIntervals)
+                        if (isEditingThis) {
+                            Text(
+                                "(editing above)",
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        } else {
+                            block.intervals.forEachIndexed { intervalIndex, interval ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("${interval.label}: ${interval.durationSeconds} sec", modifier = Modifier.weight(1f))
+                                    IconButton(
+                                        onClick = {
+                                            val mutableIntervals = block.intervals.toMutableList()
+                                            mutableIntervals.removeAt(intervalIndex)
+                                            if (mutableIntervals.isEmpty()) {
+                                                blocks.removeAt(blockIndex)
+                                            } else {
+                                                blocks[blockIndex] = block.copy(intervals = mutableIntervals)
+                                            }
+                                        },
+                                        enabled = !isEditingOther
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete interval")
                                     }
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete interval")
                                 }
                             }
                         }
