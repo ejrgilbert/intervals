@@ -447,6 +447,13 @@ fun PlanEditorScreen(
                 // Actually clear the plan
                 blocks.clear()
                 currentBlock.clear()
+                intervalLabel = ""
+                minutes = "0"
+                seconds = "0"
+                repeatIndefinitely = false
+                repeatCount = "1"
+                editingBlockIndex = null
+                editingIntervalIndex = null
                 isHoldingClear = false
                 clearProgress = 0f
             } else {
