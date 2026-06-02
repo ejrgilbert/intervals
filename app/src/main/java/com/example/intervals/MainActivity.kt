@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -30,6 +31,10 @@ class MainActivity : ComponentActivity() {
             var lastFinishedPlan by remember { mutableStateOf<RunPlan?>(null) }
             var lastExecutions by remember { mutableStateOf<List<BlockExecution>>(emptyList()) }
             var showingSummary by remember { mutableStateOf(false) }
+
+            // Holds the editor's rememberSaveable state while RunScreen/Summary are
+            // showing, so the user comes back to their plan instead of an empty one.
+            val saveableStateHolder = rememberSaveableStateHolder()
 
             Box(
                 modifier = Modifier
@@ -61,8 +66,10 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     else -> {
-                        PlanEditorScreen { blocks ->
-                            currentPlan = RunPlan(name = "Custom Plan", blocks = blocks)
+                        saveableStateHolder.SaveableStateProvider("plan-editor") {
+                            PlanEditorScreen { blocks ->
+                                currentPlan = RunPlan(name = "Custom Plan", blocks = blocks)
+                            }
                         }
                     }
                 }
