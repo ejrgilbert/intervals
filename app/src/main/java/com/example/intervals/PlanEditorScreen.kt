@@ -105,15 +105,15 @@ fun PlanEditorScreen(
     }
 
     var intervalLabel by rememberSaveable { mutableStateOf("") }
-    var minutes by rememberSaveable { mutableStateOf("0") }
-    var seconds by rememberSaveable { mutableStateOf("0") }
+    var minutes by rememberSaveable { mutableStateOf("") }
+    var seconds by rememberSaveable { mutableStateOf("") }
 
     // --- Repeat configuration ---
     var repeatModeName by rememberSaveable { mutableStateOf(RepeatMode.TIMES.name) }
     val repeatMode = RepeatMode.valueOf(repeatModeName)
-    var repeatCount by rememberSaveable { mutableStateOf("1") } // for TIMES
-    var repeatMinutes by rememberSaveable { mutableStateOf("5") } // for DURATION
-    var repeatSeconds by rememberSaveable { mutableStateOf("0") } // for DURATION
+    var repeatCount by rememberSaveable { mutableStateOf("") } // for TIMES
+    var repeatMinutes by rememberSaveable { mutableStateOf("") } // for DURATION
+    var repeatSeconds by rememberSaveable { mutableStateOf("") } // for DURATION
 
     // null when adding a new block; index into `blocks` when editing an existing one.
     var editingBlockIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -177,8 +177,8 @@ fun PlanEditorScreen(
                             currentBlock.add(newInterval)
                         }
                         intervalLabel = ""
-                        minutes = "0"
-                        seconds = "0"
+                        minutes = ""
+                        seconds = ""
                     }
                 }) {
                     Text(if (editingIntervalIndex != null) "Save" else "Add Interval")
@@ -189,8 +189,8 @@ fun PlanEditorScreen(
                     OutlinedButton(onClick = {
                         editingIntervalIndex = null
                         intervalLabel = ""
-                        minutes = "0"
-                        seconds = "0"
+                        minutes = ""
+                        seconds = ""
                     }) {
                         Text("Cancel")
                     }
@@ -260,7 +260,7 @@ fun PlanEditorScreen(
                             Text(
                                 when (mode) {
                                     RepeatMode.TIMES -> "Times"
-                                    RepeatMode.DURATION -> "Minutes"
+                                    RepeatMode.DURATION -> "Duration"
                                     RepeatMode.INFINITE -> "∞"
                                 }
                             )
@@ -336,9 +336,9 @@ fun PlanEditorScreen(
                                 }
                                 currentBlock.clear()
                                 repeatModeName = RepeatMode.TIMES.name
-                                repeatCount = "1"
-                                repeatMinutes = "5"
-                                repeatSeconds = "0"
+                                repeatCount = ""
+                                repeatMinutes = ""
+                                repeatSeconds = ""
                                 editingBlockIndex = null
                                 editingIntervalIndex = null
                             }
@@ -353,14 +353,14 @@ fun PlanEditorScreen(
                         OutlinedButton(onClick = {
                             currentBlock.clear()
                             repeatModeName = RepeatMode.TIMES.name
-                            repeatCount = "1"
-                            repeatMinutes = "5"
-                            repeatSeconds = "0"
+                            repeatCount = ""
+                            repeatMinutes = ""
+                            repeatSeconds = ""
                             editingBlockIndex = null
                             editingIntervalIndex = null
                             intervalLabel = ""
-                            minutes = "0"
-                            seconds = "0"
+                            minutes = ""
+                            seconds = ""
                         }) {
                             Text("Cancel")
                         }
@@ -562,12 +562,12 @@ fun PlanEditorScreen(
                 blocks.clear()
                 currentBlock.clear()
                 intervalLabel = ""
-                minutes = "0"
-                seconds = "0"
+                minutes = ""
+                seconds = ""
                 repeatModeName = RepeatMode.TIMES.name
-                repeatCount = "1"
-                repeatMinutes = "5"
-                repeatSeconds = "0"
+                repeatCount = ""
+                repeatMinutes = ""
+                repeatSeconds = ""
                 editingBlockIndex = null
                 editingIntervalIndex = null
                 isHoldingClear = false
