@@ -212,7 +212,13 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan, List<BlockExecution>) -> Unit) 
                     .height(56.dp)
                     .width(100.dp)
                     .pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { isHoldingSkip = true })
+                        detectTapGestures(
+                            onPress = {
+                                tryAwaitRelease()
+                                isHoldingSkip = false
+                            },
+                            onLongPress = { isHoldingSkip = true }
+                        )
                     }
                     .background(
                         color = if (isHoldingSkip) {
@@ -237,7 +243,13 @@ fun RunScreen(plan: RunPlan, onFinish: (RunPlan, List<BlockExecution>) -> Unit) 
                     .height(56.dp)
                     .width(100.dp)
                     .pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { isHoldingStop = true })
+                        detectTapGestures(
+                            onPress = {
+                                tryAwaitRelease()
+                                isHoldingStop = false
+                            },
+                            onLongPress = { isHoldingStop = true }
+                        )
                     }
                     .background(
                         color = if (isHoldingStop) Color.Red.copy(alpha = stopProgress) else Color.Gray,

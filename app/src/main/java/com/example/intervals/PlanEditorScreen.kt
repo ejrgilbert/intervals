@@ -515,6 +515,10 @@ fun PlanEditorScreen(
                     .pointerInput(canClear) {
                         if (canClear) {
                             detectTapGestures(
+                                onPress = {
+                                    tryAwaitRelease()
+                                    isHoldingClear = false
+                                },
                                 onLongPress = { isHoldingClear = true }
                             )
                         }
