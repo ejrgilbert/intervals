@@ -2,9 +2,9 @@ package com.example.intervalrunner
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -121,7 +121,12 @@ fun PlanEditorScreen(
     // null when adding a new interval; index into `currentBlock` when editing one.
     var editingIntervalIndex by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
         Text("Create Interval Plan", style = MaterialTheme.typography.headlineMedium)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -202,8 +207,8 @@ fun PlanEditorScreen(
                 style = MaterialTheme.typography.titleMedium
             )
 
-            LazyColumn {
-                itemsIndexed(currentBlock) { index, interval ->
+            Column {
+                currentBlock.forEachIndexed { index, interval ->
                     val editingThisInterval = editingIntervalIndex == index
                     val editingOtherInterval = editingIntervalIndex != null && !editingThisInterval
                     Row(
@@ -370,8 +375,8 @@ fun PlanEditorScreen(
         if (blocks.isNotEmpty()) {
             Text("Saved Blocks", style = MaterialTheme.typography.titleMedium)
 
-            LazyColumn {
-                itemsIndexed(blocks) { blockIndex, block ->
+            Column {
+                blocks.forEachIndexed { blockIndex, block ->
                     Column(
 //                        modifier = Modifier
 //                            .fillMaxWidth()
