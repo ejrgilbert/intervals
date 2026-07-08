@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,17 +41,53 @@ class TimerService : Service() {
         toneGenerator = runCatching {
             ToneGenerator(AudioManager.STREAM_MUSIC, 100)
         }.getOrNull()
-        tts = TextToSpeech(applicationContext) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
-            if (ttsReady) tts?.language = Locale.US
+        lateinit var engine: TextToSpeech
+        engine = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                engine.language = Locale.US
+                ttsReady = true
+            }
         }
+        tts = engine
+
         TimerEngine.setAudio(
             beep = {
                 toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
             },
             speak = { label ->
-                if (ttsReady) tts?.speak(label, TextToSpeech.QUEUE_FLUSH, null, null)
+                if (ttsReady) tts?.speak(label, TextToSpeech.QUEUE_ADD, null, null)
             },
+            speakAndThen = { text, onDone ->
+                if (!ttsReady) {
+                    onDone()
+                    return@setAudio
+                }
+
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(id: String?) {
+                    }
+
+                    override fun onDone(id: String?) {
+                        scope.launch {
+                            onDone()
+                        }
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(id: String?) {
+                        scope.launch {
+                            onDone()
+                        }
+                    }
+                })
+
+                tts?.speak(
+                    text,
+                    TextToSpeech.QUEUE_ADD,
+                    null,
+                    "id"
+                )
+            }
         )
         TimerEngine.onFinished = {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -90,7 +127,7 @@ class TimerService : Service() {
         super.onDestroy()
         collectJob?.cancel()
         scope.cancel()
-        TimerEngine.setAudio(null, null)
+        TimerEngine.setAudio(null, null, null)
         TimerEngine.onFinished = null
         tts?.stop()
         tts?.shutdown()

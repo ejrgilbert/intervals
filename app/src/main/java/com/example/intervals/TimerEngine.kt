@@ -17,7 +17,7 @@ data class TimerSnapshot(
     val intervalIndex: Int = 0,
     val blockPass: Int = 0,
     val blockElapsedSeconds: Int = 0,
-    val secondsRemaining: Int = 0,
+    var secondsRemaining: Int = 0,
     val running: Boolean = false,
     val finished: Boolean = false,
     // SystemClock.elapsedRealtime() when the current interval will hit zero.
@@ -44,11 +44,17 @@ object TimerEngine {
 
     private var beep: (() -> Unit)? = null
     private var speak: ((String) -> Unit)? = null
+    private var speakAndThen: ((String, () -> Unit) -> Unit)? = null
     var onFinished: (() -> Unit)? = null
 
-    fun setAudio(beep: (() -> Unit)?, speak: ((String) -> Unit)?) {
+    fun setAudio(
+        beep: (() -> Unit)?,
+        speak: ((String) -> Unit)?,
+        speakAndThen: ((String, () -> Unit) -> Unit)?
+    ) {
         this.beep = beep
         this.speak = speak
+        this.speakAndThen = speakAndThen
     }
 
     // Load a plan and reset to the first interval, paused. The user (via
@@ -126,14 +132,17 @@ object TimerEngine {
     }
 
     private fun finish() {
-        // Preserve plan so RunScreen can tell this finished state belongs to the
-        // plan it was watching, vs. a leftover from a previous run.
-        _state.value = _state.value.copy(
-            finished = true,
-            running = false,
-            endRealtimeMs = null,
-        )
-        onFinished?.invoke()
+        beep?.invoke()
+        speakAndThen?.invoke("plan completed") {
+            // Preserve plan so RunScreen can tell this finished state belongs to the
+            // plan it was watching, vs. a leftover from a previous run.
+            _state.value = _state.value.copy(
+                finished = true,
+                running = false,
+                endRealtimeMs = null,
+            )
+            onFinished?.invoke()
+        }
     }
 
     // Beep + spoken "halfway" matches the existing beep-then-announce pattern
@@ -150,11 +159,12 @@ object TimerEngine {
     private fun runLoop() {
         tickJob = scope.launch {
             while (true) {
-                val snap = _state.value
+                var snap = _state.value
                 if (!snap.running || snap.finished) return@launch
                 val plan = snap.plan ?: return@launch
                 val block = snap.currentBlock ?: return@launch
                 val interval = snap.currentInterval ?: return@launch
+                snap.secondsRemaining = interval.durationSeconds
 
                 // Beep then announce the interval label (matches pre-refactor UX).
                 beep?.invoke()
